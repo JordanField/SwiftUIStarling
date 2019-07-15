@@ -8,7 +8,6 @@
 
 import Foundation
 
-let accessToken = "[REDACTED]"
 let authorization = "Bearer \(accessToken)"
 let apiUrl = URL(string: "https://api.starlingbank.com/api/")!
 
