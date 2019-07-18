@@ -8,45 +8,52 @@
 
 import SwiftUI
 import Combine
+import Foundation
 
-class TransactionFeedViewModel: BindableObject {
+
+struct TransactionFeedDetail: View {
+  let transactionFeedItem: TransactionFeedItem
   
-  let account: Account
-  @Binding var changesSince: Date {
-    didSet {
-      self.account.transactionFeedPublisher(since: self.changesSince)
-        .collect()
-        .assertNoFailure()
-        .assign(to: \TransactionFeedViewModel.transactions, on: self)
-    }
-  }
-  
-  var didChange = PassthroughSubject<[TransactionFeedItem], Never>()
-  
-  var transactions = [TransactionFeedItem]() {
-    didSet {
-      didChange.send(self.transactions)
-    }
-  }
-  
-  init(account: Account, changesSince: Binding<Date>) {
-    self.$changesSince = changesSince
-    self.account = account
+  var body: some View {
+    VStack {
+      Text(verbatim: "\(transactionFeedItem.id)")
+      Text(verbatim: "\(transactionFeedItem.counterPartyName)")
+      Text(verbatim: "\(transactionFeedItem.amount.description)")
+      Text("\(transactionFeedItem.transactionTime)")
+    }.navigationBarTitle(Text(verbatim: "\(transactionFeedItem.counterPartyName)"))
   }
 }
 
 struct TransactionFeedList: View {
-  var account: Account
+  let account: Account
   
-  @State var changesSince: Date = Date()
-  @State var transactionsVm: TransactionFeedViewModel = 
+  @State private var changesSince: Date = Date()
+  @State private var transactions: [TransactionFeedItem] = []
+  
+  private func pub() -> AnyPublisher<[TransactionFeedItem], Never> {
+    return account.transactionFeedPublisher(since: Date(timeIntervalSince1970: 0))
+      .collect()
+      .catch { _ in Just([]) }
+      .receive(on: RunLoop.main)
+      .eraseToAnyPublisher()
+  }
+  
+  init(account: Account) {
+    self.account = account
+  }
   
   var body: some View {
-    VStack {
-      DatePicker($changesSince)
-      List(transactionsVm.transactions) { transaction in
-        Text("\(transaction.counterPartyName)")
+    List(transactions) { transaction in
+      PresentationLink(destination: TransactionFeedDetail(transactionFeedItem: transaction)) {
+        HStack {
+          Text("\(transaction.counterPartyName)")
+          Spacer()
+          Text("\(transaction.sourceAmount.description)")
+        }
       }
+    }.navigationBarTitle("\(account.currency.rawValue)")
+     .onReceive(pub()) {
+      self.transactions = $0
     }
   }
 }
@@ -55,18 +62,23 @@ struct ContentView : View {
   
   @State var accounts = [Account]()
   
-  func f() {
+  private let publisher =
     accountsPublisher()
-      .assertNoFailure()
       .collect()
-      .assign(to: \ContentView.accounts, on: self)
-  }
+      .catch { _ in Just([]) }
+      .receive(on: RunLoop.main)
   
   var body: some View {
-    List(accounts) {account in
-      NavigationLink(destination: TransactionFeedList() {
-        Text("\(account.currency.rawValue)")
+    VStack {
+      NavigationView {
+        List(accounts) {account in
+          NavigationLink(destination: TransactionFeedList(account: account)) {
+            Text(verbatim: "\(account.currency.rawValue)")
+          }
+        }.navigationBarTitle(Text("Accounts"), displayMode: .inline)
       }
+    }.onReceive(publisher) {
+      self.accounts = $0
     }
   }
 }

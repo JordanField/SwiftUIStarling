@@ -22,9 +22,15 @@ enum Direction: String, Codable {
   case IN, OUT
 }
 
-struct Money: Codable {
+struct Money: Codable, CustomStringConvertible {
   var currency: String
   var minorUnits: Int
+  
+  var decimal: String {
+    return "\(minorUnits / 100).\(minorUnits % 100)"
+  }
+  
+  var description: String { "\(currency) \(decimal)" }
 }
 
 struct Account: Identifiable, Decodable {
@@ -48,6 +54,8 @@ struct TransactionFeedItem: Identifiable, Decodable {
   var sourceAmount: Money
   var direction: Direction
   var counterPartyName: String
+  var status: String
+  var transactionTime: Date
     
   typealias Id = UUID
   var id: UUID { feedItemUid }
@@ -62,10 +70,13 @@ enum NetworkError: Error {
   case statusCode(Int)
 }
 
-let jsonDecoder = JSONDecoder()
+
 let jsonEncoder = JSONEncoder()
   
 func accountsPublisher() -> AnyPublisher<Account, Error> {
+  
+  var jsonDecoder = JSONDecoder()
+  jsonDecoder.dateDecodingStrategy = .iso8601
   
   let url = URL(string: "v2/accounts", relativeTo: apiUrl)!
   let request = URLRequest(url: url).authorized()
@@ -84,9 +95,12 @@ extension Account {
     func transactionFeedPublisher(since date: Date) -> AnyPublisher<TransactionFeedItem, Error> {
     
     let formatter = ISO8601DateFormatter()
+      
+    var jsonDecoder = JSONDecoder()
+    jsonDecoder.dateDecodingStrategy = .formatted(DateFormatter.iso8601Full)
     
     let url = URL(string: "v2/feed/account/\(self.id)/category/\(self.defaultCategory)?changesSince=\(formatter.string(from: date))", relativeTo: apiUrl)!
-    var request = URLRequest(url: url).authorized()
+    let request = URLRequest(url: url).authorized()
     
     return URLSession.shared.dataTaskPublisher(for: request)
       .validateHttpUrlResponse()
