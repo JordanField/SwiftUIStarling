@@ -8,13 +8,3 @@
 
 import Foundation
 
-let authorization = "Bearer \(accessToken)"
-let apiUrl = URL(string: "https://api.starlingbank.com/api/")!
-
-extension URLRequest {
-  func authorized() -> URLRequest {
-    var request = self
-    request.addValue(authorization, forHTTPHeaderField: "Authorization")
-    return request
-  }
-}

@@ -10,6 +10,34 @@ import Foundation
 import SwiftUI
 import Combine
 
+enum StarlingApi {
+  static let apiUrl = URL(string: "https://api.starlingbank.com/api/")!
+  static let authorization = "Bearer \(accessToken)"
+  
+  enum Accounts {
+    struct ListResource: Decodable {
+        var accounts: [Account]
+    }
+    
+    static func list() -> URLRequest {
+      let url = URL(string: "v2/accounts", relativeTo: apiUrl)!
+      return URLRequest(url: url).authorized()
+    }
+  }
+  
+  enum TransactionFeed {
+    struct ListResource: Decodable {
+      var feedItems: [TransactionFeedItem]
+    }
+    
+    static func list(account: Account, changesSince: Date) -> URLRequest {
+      let formatter = ISO8601DateFormatter()
+      let url = URL(string: "v2/feed/account/\(account.id)/category/\(account.defaultCategory)?changesSince=\(formatter.string(from: changesSince))", relativeTo: StarlingApi.apiUrl)!
+      return URLRequest(url: url).authorized()
+    }
+  }
+}
+
 extension Array {
   var publisher: Publishers.Sequence<Self, Error> { Publishers.Sequence(sequence: self) }
 }
@@ -33,18 +61,58 @@ struct Money: Codable, CustomStringConvertible {
   var description: String { "\(currency) \(decimal)" }
 }
 
-struct Account: Identifiable, Decodable {
-  var accountUid: UUID
-  var defaultCategory: UUID
-  var currency: Currency
-  var createdAt: String
+class Account: Identifiable, Decodable {
+  let accountUid: UUID
+  let defaultCategory: UUID
+  let currency: Currency
+  let createdAt: String
   
-  typealias Id = UUID
   var id: UUID { accountUid }
+  
+  lazy var transactionFeed = TransactionFeed(account: self)
 }
 
-struct AccountsResource: Decodable {
-  var accounts: [Account]
+class TransactionFeed: BindableObject {
+  let account: Account
+  var feed: [TransactionFeedItem] = [] { didSet { didChange.send() } }
+  let didChange = PassthroughSubject<Void, Never>()
+  
+  private func getFeed() {
+    
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .formatted(DateFormatter.iso8601Full)
+    
+    _ = URLSession.shared.dataTaskPublisher(for: StarlingApi.TransactionFeed.list(account: account, changesSince: Date(timeIntervalSince1970: 0)))
+      .validateHttpUrlResponse()
+      .map { (data, _) in data}
+      .decode(type: StarlingApi.TransactionFeed.ListResource.self, decoder: decoder)
+      .map { $0.feedItems }
+      .catch { _ in Just([]) }
+      .receive(on: RunLoop.main)
+      .sink { self.feed = $0 }
+  }
+  
+  init(account: Account) {
+    self.account = account
+    print("new transaction feed")
+    
+    self.getFeed()
+  }
+}
+
+class AccountsListViewModel: BindableObject {
+  var accounts: [Account] = []
+  var didChange = URLSession.shared.dataTaskPublisher(for: StarlingApi.Accounts.list())
+    .validateHttpUrlResponse()
+    .map { (data, _) in data }
+    .decode(type: StarlingApi.Accounts.ListResource.self, decoder: JSONDecoder()).print()
+    .map { $0.accounts }
+    .catch { error in Just([]) }
+    .receive(on: RunLoop.main)
+  
+  init() {
+    _ = didChange.assign(to: \.accounts, on: self)
+  }
 }
 
 struct TransactionFeedItem: Identifiable, Decodable {
@@ -60,54 +128,31 @@ struct TransactionFeedItem: Identifiable, Decodable {
   typealias Id = UUID
   var id: UUID { feedItemUid }
 }
+
+class TransactionFeedViewModel: BindableObject {
+  let account: Account
+  @Published var changesSince = Date()
+  var feed: [TransactionFeedItem] = []
   
-struct ListTransactionFeedResource: Decodable {
-  var feedItems: [TransactionFeedItem]
+  lazy var didChange = self.$changesSince.print()
+    .flatMap { date in
+      URLSession.shared.dataTaskPublisher(for: StarlingApi.TransactionFeed.list(account: self.account, changesSince: date))
+      .assertNoFailure()
+    }
+    .validateHttpUrlResponse()
+    .map { (data, _) in data }
+    .decode(type: StarlingApi.TransactionFeed.ListResource.self, decoder: JSONDecoder())
+    .map { $0.feedItems }
+    .catch { _ in Just([]) }
+    .receive(on: RunLoop.main)
+  
+  init(account: Account) {
+    self.account = account
+    _ = self.didChange.assign(to: \.feed, on: self)
+  }
 }
   
 enum NetworkError: Error {
   case responseNotHttp
   case statusCode(Int)
-}
-
-
-let jsonEncoder = JSONEncoder()
-  
-func accountsPublisher() -> AnyPublisher<Account, Error> {
-  
-  var jsonDecoder = JSONDecoder()
-  jsonDecoder.dateDecodingStrategy = .iso8601
-  
-  let url = URL(string: "v2/accounts", relativeTo: apiUrl)!
-  let request = URLRequest(url: url).authorized()
-  
-  return URLSession.shared.dataTaskPublisher(for: request)
-    .validateHttpUrlResponse()
-    .map { (data, _) in data }
-    .decode(type: AccountsResource.self, decoder: jsonDecoder)
-    .map { resource in resource.accounts }
-    .flatMap { accounts in accounts.publisher().setFailureType(to: Error.self) }
-    .eraseToAnyPublisher()
-}
-
-extension Account {
- 
-    func transactionFeedPublisher(since date: Date) -> AnyPublisher<TransactionFeedItem, Error> {
-    
-    let formatter = ISO8601DateFormatter()
-      
-    var jsonDecoder = JSONDecoder()
-    jsonDecoder.dateDecodingStrategy = .formatted(DateFormatter.iso8601Full)
-    
-    let url = URL(string: "v2/feed/account/\(self.id)/category/\(self.defaultCategory)?changesSince=\(formatter.string(from: date))", relativeTo: apiUrl)!
-    let request = URLRequest(url: url).authorized()
-    
-    return URLSession.shared.dataTaskPublisher(for: request)
-      .validateHttpUrlResponse()
-      .map { (data, _ ) in data }
-      .decode(type: ListTransactionFeedResource.self, decoder: jsonDecoder)
-      .map { $0.feedItems }
-      .flatMap { $0.publisher().setFailureType(to: Error.self) }
-      .eraseToAnyPublisher()
-  }
 }

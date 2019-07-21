@@ -34,4 +34,20 @@ extension DateFormatter {
     formatter.locale = Locale(identifier: "en_US_POSIX")
     return formatter
   }()
+  
+  static let basic: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.doesRelativeDateFormatting = true
+    formatter.dateStyle = .medium
+    return formatter
+  }()
+}
+
+extension URLRequest {
+  func authorized() -> URLRequest {
+    var request = self
+    request.addValue(StarlingApi.authorization, forHTTPHeaderField: "Authorization")
+    return request
+  }
 }
