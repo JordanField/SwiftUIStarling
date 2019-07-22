@@ -68,27 +68,18 @@ struct TransactionFeedOverview: View {
   let account: Account
   @ObjectBinding var feed: TransactionFeed
   @State private var open = false
-  @State private var dragOffset = CGSize.zero
   @State private var changesSince: Date = Date()
   
   var body: some View {
-    ZStack {
+    ZStack(alignment: .bottom) {
       TransactionFeedList(feed: feed, changesSince: $changesSince)
       VStack {
-        Spacer()
-        ZStack {
-          ShapeView(shape: Rectangle(), style: Color.white)
-            .frame(maxHeight: 250)
-            .cornerRadius(40).shadow(radius: 10)
-          VStack {
-            ShapeView(shape: Capsule(), style: Color.secondary).frame(width: 30, height: 5, alignment: .center).gesture(DragGesture().onChanged { value in
-              self.dragOffset = value.translation
-            })
-            DatePicker($changesSince)
-          }
-        }.offset(y: dragOffset.height)
-      }.edgesIgnoringSafeArea(.bottom)
-    }.navigationBarTitle("\(account.currency.rawValue)", displayMode: .inline)
+        ShapeView(shape: Capsule(), style: Color.secondary).frame(width: 35, height: 10).padding().tapAction {
+          self.open.toggle()
+        }
+        DatePicker($changesSince).padding(.bottom)
+      }.frame(width: UIScreen.main.bounds.width).background(Color.init(.displayP3, white: 0.95, opacity: 1.0)).cornerRadius(20).offset(y: open ? 0 : 225).animation(.fluidSpring())
+    }.edgesIgnoringSafeArea(.bottom).navigationBarTitle("\(account.currency.rawValue)", displayMode: .inline)
   }
 }
 
